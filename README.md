@@ -1,12 +1,14 @@
 # Test Task
 
 to run use
-dotnet run 
+
+`dotnet run`
+
 if you want to specify download folder run as:
 
-dotnet run downloadFolder=myDownloadFolder
+`dotnet run downloadFolder=myDownloadFolder`
 
-or you can modify appsettings.json and set DownloadFolder.
+or you can modify `appsettings.json` and set `DownloadFolder` property.
 
 Application uses SwaggerUI to expose human friendly api. You can test it by accessing root ( http://localhost:5000 by default)
 
@@ -23,7 +25,7 @@ There's a validation for multiple downloads to the same file name, returns bad r
 
 Further information let me know
 
-Pending tasks:
+###Pending tasks:
 Parallel download requests don't validate the same filename from other request. This would throw errors.
 Configure better server things like CORS, etc.
 Improve download speed metric
