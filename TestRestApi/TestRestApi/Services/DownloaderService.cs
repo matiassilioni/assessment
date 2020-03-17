@@ -20,29 +20,40 @@ namespace TestRestApi
         private readonly ILogger<DownloaderService> _logger;
 
 
-        public DownloaderService(FileDonwladStatus fileDonwladStatus, IConfiguration configuration, ILogger<DownloaderService> logger)
+        public DownloaderService(FileDonwladStatus fileDonwloadStatus, IConfiguration configuration, ILogger<DownloaderService> logger)
         {
-            this._definitions = fileDonwladStatus.Definitions;
+            this._definitions = fileDonwloadStatus.Definitions;
             _downloadFolder = configuration["DownloadFolder"];
             this._logger = logger;
         }
 
         public List<string> GetDuplicatedFiles(DownloadRequest files)
         {
+            if (files.Links == null)
+                return new List<string>();
             List<string> duplicatedFiles = files.Links.GroupBy(x => x.Filename).Where(w => w.Count() > 1).Select(s => s.Key).ToList();
             return duplicatedFiles;
         }
 
         public async Task Download(DownloadRequest files)
         {
+
+            if (files.Links == null || files.Links.Count == 0)
+                return;
             var tasks = new List<Task>();
             if (files.Threads < 1)
                 files.Threads = 1;
 
-            var semahpore = new SemaphoreSlim(files.Threads, files.Threads);
-            //ReadDuplicated
-            var currentDownloadDefinitions = GetGroupedLinks(files);
+            var duplicated = GetDuplicatedFiles(files);
+            if (duplicated.Count != 0)
+                return;
+
+            //Semaphore to control max concurrent parallel downloads.
+            var semaphore = new SemaphoreSlim(files.Threads, files.Threads);
             
+            //Fix Duplicated links to different file names
+            var currentDownloadDefinitions = GetGroupedLinks(files);
+
             _definitions.AddRange(currentDownloadDefinitions);
 
             var downloadTasks = new List<Task>();
@@ -52,26 +63,26 @@ namespace TestRestApi
                 {
                     var freshLink = link;
                     var fileStreams = new List<FileStream>();
-                    await semahpore.WaitAsync();
+                    await semaphore.WaitAsync();
+                    _logger.LogInformation("{link}, Started", freshLink.FileDefinitions[0].Link);
+                    freshLink.Status = State.Downloading;
                     freshLink.Started = DateTime.Now;
                     freshLink.BytesDownloaded = 0;
                     try
                     {
-                        _logger.LogInformation("{link}, Started", freshLink.FileDefinitions[0].Link);
-                        freshLink.Status = State.Downloading;
                         HttpWebRequest req = (HttpWebRequest)WebRequest.Create(freshLink.FileDefinitions[0].Link);
                         var response = await req.GetResponseAsync();
 
                         using (var reponseStream = response.GetResponseStream())
                         {
-                            
+
                             foreach (var fileDefinition in freshLink.FileDefinitions)
                             {
                                 if (!Directory.Exists(_downloadFolder))
                                     Directory.CreateDirectory(_downloadFolder);
-                                fileStreams.Add(new FileStream(Path.Combine(_downloadFolder,fileDefinition.Filename), FileMode.OpenOrCreate));
+                                fileStreams.Add(new FileStream(Path.Combine(_downloadFolder, fileDefinition.Filename), FileMode.OpenOrCreate));
                             }
-                            const int bufferSize = 1024 * 1024;
+                            const int bufferSize = 1024 * 500;  //500kb
                             var buffer = new byte[bufferSize];
                             int bytesRead = 0;
                             var stopwatch = new Stopwatch();
@@ -88,11 +99,10 @@ namespace TestRestApi
                                 }
                                 decimal speed = bytesRead / (decimal)1024;
                                 speed = speed / (decimal)stopwatch.Elapsed.TotalSeconds;
-                                freshLink.CurrentSpeed = $"{Math.Round(speed,2)} kb/s";
+                                freshLink.CurrentSpeed = $"{Math.Round(speed, 2)} kb/s";
                             } while (bytesRead > 0);
                             freshLink.DownloadEnd = DateTime.Now;
                             freshLink.Status = State.Finished;
-
                         }
                     }
                     catch (Exception e)
@@ -106,7 +116,7 @@ namespace TestRestApi
                         {
                             fs.Close();
                         }
-                        semahpore.Release();
+                        semaphore.Release();
                     }
                 });
                 downloadTasks.Add(downloadTask);
@@ -115,134 +125,13 @@ namespace TestRestApi
             _logger.LogInformation("all requested downloads finished");
         }
 
-        private List<FileDownloadDefinition> GetGroupedLinks(DownloadRequest files)
+        public List<FileDownloadDefinition> GetGroupedLinks(DownloadRequest files)
         {
-            var currentDownloadDefinitions = new List<FileDownloadDefinition>();
-            foreach (var link in files.Links)
-            {
-                var alreadyRegisteredToDownload = currentDownloadDefinitions.FirstOrDefault(x => x.FileDefinitions.FirstOrDefault(y => y.Link == link.Link) != null);
-                if (alreadyRegisteredToDownload != null)
-                {
-                    alreadyRegisteredToDownload.FileDefinitions.Add(link);
-                    continue;
-                }
-                var freshLink = new FileDownloadDefinition(link);
-                currentDownloadDefinitions.Add(freshLink);
-            }
-            return currentDownloadDefinitions;
+            if (files.Links == null)
+                return new List<FileDownloadDefinition>();
+            var items = files.Links.GroupBy(x => x.Link).Select(x => new FileDownloadDefinition(x)).ToList();
+            return items;
+            
         }
-
-        //public async Task Download(DownloadRequest files)
-        //{
-        //    var tasks = new List<Task>();
-
-        //    foreach (var link in files.Links)
-        //    {
-        //        var alreadyRegisteredToDoownload = _definitions.FirstOrDefault(x => x.FileDefinitions.FirstOrDefault(y => y.Link == link.Link) != null);
-        //        if (alreadyRegisteredToDoownload != null)
-        //        {
-        //            alreadyRegisteredToDoownload.FileDefinitions.Add(link);
-        //            await this.CopyIfFinished(alreadyRegisteredToDoownload);
-        //            continue;
-        //        }
-        //        var freshLink = new FileDownloadDefinition(link);
-
-        //        //TODO: VALIDATE LINK
-        //        var req = WebRequest.Create(link.Link);
-        //        //var response = await req.GetResponseAsync();
-        //        req.Method = "HEAD";
-        //        var resp = await req.GetResponseAsync();
-
-        //        int responseLength = int.Parse(resp.Headers.Get("Content-Length"));
-        //        var parts = files.Threads;
-        //        var eachSize = responseLength / parts;
-        //        var lastPartSize = eachSize + (responseLength % parts);
-
-
-        //        _definitions.Add(freshLink);
-        //        int i = 0;
-        //        for (; i < parts - 1; i++)
-        //        {
-        //            tasks.Add(DoDownload(new FilePartDownloadRequest(link.Link, i * eachSize, eachSize, i)));
-        //        }
-        //        tasks.Add(DoDownload(new FilePartDownloadRequest(link.Link, (parts - 1) * eachSize, lastPartSize, i)));
-        //    }
-
-        //    //string url = "http://somefile.mp3";
-        //    //List<FileDownloader> filewonloadersList = new List<FileDownloader>();
-        //    //System.Net.WebRequest req = System.Net.HttpWebRequest.Create(url);
-        //    //var response = req.GetResponse();
-        //    //req.Method = "HEAD";
-        //    //System.Net.WebResponse resp = req.GetResponse();
-        //    //int responseLength = int.Parse(resp.Headers.Get("Content-Length"));
-        //    //int parts = 6;
-        //    //var eachSize = responseLength / parts;
-        //    //var lastPartSize = eachSize + (responseLength % parts);
-        //    //for (int i = 0; i < parts - 1; i++)
-        //    //{
-        //    //    filewonloadersList.Add(new FileDownloader(url, i * eachSize, eachSize));
-        //    //}
-        //    //filewonloadersList.Add(new FileDownloader(url, (parts - 1) * eachSize, lastPartSize));
-
-        //    //var threads = new List<Thread>();
-        //    //foreach (var item in filewonloadersList)
-        //    //{
-        //    //    var newThread = new Thread(DoDownload);
-        //    //    threads.Add(newThread);
-        //    //    newThread.Start(item);
-        //    //}
-        //    await Task.WhenAll(tasks);
-        //}
-
-        private async Task CopyIfFinished(FileDownloadDefinition definition)
-        {
-            if (definition.BytesDownloaded == 100)
-            {
-                await Task.CompletedTask;
-                //TODO: COPY FILE
-            }
-            return;
-        }
-
-        //public async Task DoDownload(FilePartDownloadRequest filePartDownload)
-        //{
-        //    var finished = false;
-        //    while (!finished)
-        //    {
-        //        try
-        //        {
-        //            HttpWebRequest req = (HttpWebRequest)WebRequest.Create(filePartDownload.Url);
-        //            req.AddRange(filePartDownload.Start, filePartDownload.Start + filePartDownload.Count - 1);
-        //            var response = await req.GetResponseAsync();
-        //            using (var reponseStream = response.GetResponseStream())
-        //            {
-        //                using (var fs = new FileStream($"temp_{filePartDownload.Part}.sth", FileMode.OpenOrCreate))
-        //                {
-        //                    fs.Seek(0, SeekOrigin.Begin);
-        //                    var buffer = new byte[1024];
-        //                    int bytesRead = 0;
-        //                    do
-        //                    {
-        //                        //reponseStream.Seek(downloader.Start, SeekOrigin.Current);
-        //                        bytesRead = await reponseStream.ReadAsync(buffer, 0, 1024);
-        //                        await fs.WriteAsync(buffer, 0, bytesRead);
-        //                        //await fs.FlushAsync();
-        //                    } while (bytesRead > 0);
-        //                    fs.Close();
-        //                }
-        //            }
-        //            finished = true;
-        //        }
-        //        catch (WebException e)
-        //        {
-        //            if (e.Status == WebExceptionStatus.Timeout || e.Status == WebExceptionStatus.KeepAliveFailure)
-        //            {
-        //                //retry
-        //            }
-        //            throw e;
-        //        }
-        //    }
-        //}
     }
-
 }

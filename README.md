@@ -26,4 +26,5 @@ Further information let me know
 Pending tasks:
 Parallel download requests don't validate the same filename from other request. This would throw errors.
 Configure better server things like CORS, etc.
+Improve download speed metric
 Improve log

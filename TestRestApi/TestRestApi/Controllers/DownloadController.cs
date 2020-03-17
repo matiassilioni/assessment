@@ -26,6 +26,10 @@ namespace TestRestApi.Controllers
         [HttpPost]
         public IActionResult Download(DownloadRequest request)
         {
+            if(request.Links == null || request.Links.Count ==0)
+            {
+                return new BadRequestObjectResult("no links provided");
+            }
             var duplicated = _downloaderService.GetDuplicatedFiles(request);
             if(duplicated.Count != 0)
             {
