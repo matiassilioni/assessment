@@ -27,6 +27,13 @@ namespace TestRestApi
             this._logger = logger;
         }
 
+        public bool ValidateHttpLinks(DownloadRequest files)
+        {
+            if (files.Links == null)
+                return false;
+            return !files.Links.Any(x => !x.Link.ToLower().StartsWith("http://"));
+        }
+
         public List<string> GetDuplicatedFiles(DownloadRequest files)
         {
             if (files.Links == null)
@@ -37,8 +44,9 @@ namespace TestRestApi
 
         public async Task Download(DownloadRequest files)
         {
-
             if (files.Links == null || files.Links.Count == 0)
+                return;
+            if (!ValidateHttpLinks(files))
                 return;
             var tasks = new List<Task>();
             if (files.Threads < 1)
@@ -50,7 +58,7 @@ namespace TestRestApi
 
             //Semaphore to control max concurrent parallel downloads.
             var semaphore = new SemaphoreSlim(files.Threads, files.Threads);
-            
+
             //Fix Duplicated links to different file names
             var currentDownloadDefinitions = GetGroupedLinks(files);
 
@@ -131,7 +139,7 @@ namespace TestRestApi
                 return new List<FileDownloadDefinition>();
             var items = files.Links.GroupBy(x => x.Link).Select(x => new FileDownloadDefinition(x)).ToList();
             return items;
-            
+
         }
     }
 }

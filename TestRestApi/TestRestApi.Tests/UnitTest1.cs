@@ -135,5 +135,45 @@ namespace TestRestApi.Tests
             await downloadService.Download(downloadRequest);
             Assert.Empty(fileDownloadStatus.Definitions);
         }
+
+        [Fact]
+        public async Task OnlyHttp()
+        {
+            var downloadRequest = new DownloadRequest()
+            {
+                Threads = 2,
+                Links = new System.Collections.Generic.List<LinkSave>
+                {
+                    new LinkSave{ Filename = "file1", Link="http://someValidLink"},
+                    new LinkSave{ Filename = "file2", Link="http://someValidLink"}
+                }
+            };
+            var fileDownloadStatus = new FileDonwladStatus();
+            var downloadService = new DownloaderService(fileDownloadStatus
+                , NSubstitute.Substitute.For<Microsoft.Extensions.Configuration.IConfiguration>()
+                , NSubstitute.Substitute.For<Microsoft.Extensions.Logging.ILogger<DownloaderService>>());
+            Assert.True(downloadService.ValidateHttpLinks(downloadRequest));
+        }
+        [Fact]
+        public async Task HttpsDontStart()
+        {
+            var downloadRequest = new DownloadRequest()
+            {
+                Threads = 2,
+                Links = new System.Collections.Generic.List<LinkSave>
+                {
+                    new LinkSave{ Filename = "file1", Link="https://someValidLink"},
+                    new LinkSave{ Filename = "file2", Link="http://someValidLink"}
+                }
+            };
+            var fileDownloadStatus = new FileDonwladStatus();
+            var downloadService = new DownloaderService(fileDownloadStatus
+                , NSubstitute.Substitute.For<Microsoft.Extensions.Configuration.IConfiguration>()
+                , NSubstitute.Substitute.For<Microsoft.Extensions.Logging.ILogger<DownloaderService>>());
+            Assert.False(downloadService.ValidateHttpLinks(downloadRequest));
+
+            await downloadService.Download(downloadRequest);
+            Assert.Empty(fileDownloadStatus.Definitions);
+        }
     }
 }

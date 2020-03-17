@@ -30,6 +30,9 @@ namespace TestRestApi.Controllers
             {
                 return new BadRequestObjectResult("no links provided");
             }
+            if(!_downloaderService.ValidateHttpLinks(request))
+                return new BadRequestObjectResult("http links only");
+
             var duplicated = _downloaderService.GetDuplicatedFiles(request);
             if(duplicated.Count != 0)
             {
